@@ -1,0 +1,54 @@
+---
+- name: Install curl
+  gather_facts: no
+  user: root
+  hosts: all
+  tasks:
+    - name: Install curl
+      apt:
+        name: curl
+        state: present
+      when: ansible_facts['os_family'] == "Debian"
+
+- name: Deploy a K3S cluster
+  gather_facts: yes
+  hosts: master
+  user: root
+  tasks:
+    - name: Deploy the master
+      shell: "curl -L https://get.k3s.io | sh - && sleep 10"
+
+    - name: Get the token
+      command: cat /var/lib/rancher/k3s/server/node-token
+      register: token
+
+    - name: Add k8s token and internal ip to dummy host
+      add_host:
+        token: "{{ token.stdout }}"
+        name: master_node
+        internal_ip: "{{ ansible_facts.eth1.ipv4.address }}"
+
+- name: Set up the workers
+  gather_facts: no
+  hosts: slaves
+  user: root
+
+  vars:
+    master_ip: "https://{{ hostvars['master_node']['internal_ip'] }}:6443"
+    token: "{{ hostvars['master_node']['token'] }}"
+
+  tasks:
+    - name: Set up the slaves
+      shell: "curl -L https://get.k3s.io | INSTALL_K3S_EXEC=\"agent --server={{ master_ip }} --token={{ token }}\" sh -"
+
+- name: Validate server up and running
+  gather_facts: no
+  hosts: master
+  user: root
+  tasks:
+    - name: List the nodes
+      shell: "sleep 5 && kubectl get nodes"
+      register: list
+
+    - debug:
+        var: list
